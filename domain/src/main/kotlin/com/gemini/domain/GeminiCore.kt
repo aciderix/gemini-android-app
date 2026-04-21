@@ -33,5 +33,8 @@ data class GeminiMessage(
     val timestamp: Long,
     val role: MessageRole = if (isUser) MessageRole.USER else MessageRole.MODEL,
     val toolCall: ToolCall? = null,
-    val toolResult: ToolCallResult? = null
+    val toolResult: ToolCallResult? = null,
+    // Local file paths for attachments rendered as thumbnails in the bubble.
+    // Empty for messages without attachments.
+    val attachmentPaths: List<String> = emptyList()
 )

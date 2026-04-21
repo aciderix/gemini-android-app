@@ -134,6 +134,12 @@ class ChatStore(context: Context) {
                     .put("output", tr.output)
             )
         }
+        if (m.attachmentPaths.isNotEmpty()) {
+            json.put(
+                "attachmentPaths",
+                JSONArray().apply { m.attachmentPaths.forEach { put(it) } }
+            )
+        }
         return json
     }
 
@@ -156,6 +162,9 @@ class ChatStore(context: Context) {
                 output = tr.optString("output")
             )
         }
+        val attachmentPaths = o.optJSONArray("attachmentPaths")?.let { arr ->
+            (0 until arr.length()).map { arr.optString(it) }.filter { it.isNotBlank() }
+        } ?: emptyList()
         return GeminiMessage(
             id = id,
             text = o.optString("text"),
@@ -163,7 +172,8 @@ class ChatStore(context: Context) {
             timestamp = o.optLong("timestamp", System.currentTimeMillis()),
             role = role,
             toolCall = toolCall,
-            toolResult = toolResult
+            toolResult = toolResult,
+            attachmentPaths = attachmentPaths
         )
     }
 

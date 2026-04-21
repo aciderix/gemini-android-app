@@ -188,7 +188,7 @@ class ChatViewModel(private val core: RestGeminiCore) : ViewModel() {
         if (text.isBlank() && attachments.isEmpty()) return
         if (sendJob?.isActive == true) return
         lastUserPrompt = text
-        val payload = attachments.map { Attachment(it.bytes, it.mimeType) }
+        val payload = attachments.map { Attachment(it.bytes, it.mimeType, it.localPath) }
         _pendingAttachments.value = emptyList()
         sendJob = viewModelScope.launch {
             _isLoading.value = true
@@ -238,12 +238,15 @@ class ChatViewModel(private val core: RestGeminiCore) : ViewModel() {
                 ?: return@runCatching null
             val displayName = queryDisplayName(context, uri)
                 ?: "image.${mime.substringAfter('/').take(4)}"
+            val id = "att-${System.nanoTime()}"
+            val localPath = persistAttachment(context, id, bytes, mime)
             PendingAttachment(
-                id = "att-${System.nanoTime()}",
+                id = id,
                 bytes = bytes,
                 mimeType = mime,
                 displayName = displayName.take(40),
-                sizeBytes = bytes.size
+                sizeBytes = bytes.size,
+                localPath = localPath
             )
         }.getOrNull()
     }
@@ -259,6 +262,29 @@ class ChatViewModel(private val core: RestGeminiCore) : ViewModel() {
             }
         }.getOrNull()
     }
+
+    // Copy the picked image into app-owned cache so the chat bubble can show a
+    // thumbnail without holding an Android content:// permission that may be
+    // revoked, and so reloads from ChatStore can still find the file.
+    private fun persistAttachment(
+        context: Context,
+        id: String,
+        bytes: ByteArray,
+        mime: String
+    ): String? = runCatching {
+        val ext = when {
+            mime.contains("png") -> "png"
+            mime.contains("webp") -> "webp"
+            mime.contains("gif") -> "gif"
+            mime.contains("heic") -> "heic"
+            mime.contains("heif") -> "heif"
+            else -> "jpg"
+        }
+        val dir = java.io.File(context.filesDir, "attachments").also { it.mkdirs() }
+        val file = java.io.File(dir, "$id.$ext")
+        file.writeBytes(bytes)
+        file.absolutePath
+    }.getOrNull()
 
     private fun maybeAutoCompress() {
         if (!_autoCompressEnabled.value) return
@@ -410,7 +436,8 @@ data class PendingAttachment(
     val bytes: ByteArray,
     val mimeType: String,
     val displayName: String,
-    val sizeBytes: Int
+    val sizeBytes: Int,
+    val localPath: String? = null
 ) {
     override fun equals(other: Any?) = other is PendingAttachment && id == other.id
     override fun hashCode() = id.hashCode()

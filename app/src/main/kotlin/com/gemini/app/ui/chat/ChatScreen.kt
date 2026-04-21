@@ -96,6 +96,8 @@ import com.gemini.domain.GeminiMessage
 import com.gemini.domain.MessageRole
 import com.gemini.ui.LocalGeminiColors
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -150,8 +152,11 @@ fun ChatScreen(
     }
 
     // Only auto-scroll when the user is already near the bottom — otherwise
-    // they get yanked out of whatever they were reading.
-    LaunchedEffect(messages.size, thinking, error) {
+    // they get yanked out of whatever they were reading. The streamed text of
+    // the last message grows without changing `messages.size`, so include it
+    // as a key to keep the view pinned to the bottom during streaming.
+    val tailText = messages.lastOrNull()?.text
+    LaunchedEffect(messages.size, tailText, thinking, error) {
         if (isNearBottom) {
             val target = messages.size - 1 + extraTail(thinking, error)
             if (target >= 0) listState.animateScrollToItem(target)
@@ -573,7 +578,21 @@ fun MessageBubble(
                 )
             ) {
                 if (message.isUser) {
-                    Text(message.text, color = content)
+                    Column {
+                        if (message.attachmentPaths.isNotEmpty()) {
+                            AttachmentThumbnails(message.attachmentPaths)
+                            Spacer(Modifier.height(6.dp))
+                        }
+                        val visibleText = if (message.attachmentPaths.isNotEmpty() &&
+                            message.text.startsWith("📎 ")) {
+                            // Drop the "📎 image (png, 128KB)\n" prefix added by
+                            // RestGeminiCore — the thumbnail already conveys it.
+                            message.text.substringAfter('\n', "")
+                        } else message.text
+                        if (visibleText.isNotBlank()) {
+                            Text(visibleText, color = content)
+                        }
+                    }
                 } else {
                     MarkdownText(text = message.text, color = content)
                 }
@@ -1061,4 +1080,42 @@ private fun formatBytes(size: Int): String = when {
     size >= 1_000_000 -> String.format("%.1f MB", size / 1_000_000f)
     size >= 1_000 -> "${size / 1_000} KB"
     else -> "$size B"
+}
+
+// Small thumbnails of sent image attachments. Decodes each file once via a
+// sampled BitmapFactory to keep memory low (targets ~320 px). If the file no
+// longer exists (cache cleared, sideload restore), the slot is skipped.
+@Composable
+private fun AttachmentThumbnails(paths: List<String>) {
+    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        paths.forEach { path ->
+            val bitmap = remember(path) { decodeThumbnail(path) }
+            if (bitmap != null) {
+                Image(
+                    bitmap = bitmap,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier
+                        .size(120.dp)
+                        .background(
+                            color = MaterialTheme.colorScheme.surfaceVariant,
+                            shape = MaterialTheme.shapes.small
+                        )
+                )
+            }
+        }
+    }
+}
+
+private fun decodeThumbnail(path: String): androidx.compose.ui.graphics.ImageBitmap? {
+    val file = java.io.File(path)
+    if (!file.exists()) return null
+    val opts = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    android.graphics.BitmapFactory.decodeFile(path, opts)
+    val target = 320
+    var sample = 1
+    while (opts.outWidth / sample > target && opts.outHeight / sample > target) sample *= 2
+    val load = android.graphics.BitmapFactory.Options().apply { inSampleSize = sample }
+    val bmp = android.graphics.BitmapFactory.decodeFile(path, load) ?: return null
+    return bmp.asImageBitmap()
 }

@@ -3,6 +3,8 @@ package com.gemini.app.ui.chat
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.Intent
+import android.net.Uri
 import android.widget.Toast
 import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
@@ -16,10 +18,12 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.ClickableText
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -29,8 +33,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.withStyle
@@ -135,19 +141,19 @@ private fun renderProse(body: String, baseColor: androidx.compose.ui.graphics.Co
             }
         }
         when {
-            trimmed.startsWith("### ") -> Text(
+            trimmed.startsWith("### ") -> ProseText(
                 annotateInline(trimmed.removePrefix("### "), baseColor),
                 style = MaterialTheme.typography.titleSmall,
                 color = baseColor,
                 modifier = Modifier.padding(top = 2.dp, bottom = 1.dp)
             )
-            trimmed.startsWith("## ") -> Text(
+            trimmed.startsWith("## ") -> ProseText(
                 annotateInline(trimmed.removePrefix("## "), baseColor),
                 style = MaterialTheme.typography.titleMedium,
                 color = baseColor,
                 modifier = Modifier.padding(top = 4.dp, bottom = 2.dp)
             )
-            trimmed.startsWith("# ") -> Text(
+            trimmed.startsWith("# ") -> ProseText(
                 annotateInline(trimmed.removePrefix("# "), baseColor),
                 style = MaterialTheme.typography.titleLarge,
                 color = baseColor,
@@ -159,7 +165,7 @@ private fun renderProse(body: String, baseColor: androidx.compose.ui.graphics.Co
                     modifier = Modifier.width(3.dp).height(20.dp)
                 ) {}
                 Spacer(Modifier.width(8.dp))
-                Text(
+                ProseText(
                     annotateInline(trimmed.removePrefix("> "), baseColor),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     style = MaterialTheme.typography.bodyMedium
@@ -175,7 +181,7 @@ private fun renderProse(body: String, baseColor: androidx.compose.ui.graphics.Co
                 val label = trimmed.removeRange(0, 6)
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(if (checked) "☑ " else "☐ ", color = baseColor)
-                    Text(
+                    ProseText(
                         annotateInline(label, baseColor),
                         color = baseColor,
                         style = MaterialTheme.typography.bodyMedium
@@ -187,7 +193,7 @@ private fun renderProse(body: String, baseColor: androidx.compose.ui.graphics.Co
                 horizontalArrangement = Arrangement.Start
             ) {
                 Text("•  ", color = baseColor)
-                Text(
+                ProseText(
                     annotateInline(trimmed.drop(2), baseColor),
                     color = baseColor,
                     style = MaterialTheme.typography.bodyMedium
@@ -198,18 +204,18 @@ private fun renderProse(body: String, baseColor: androidx.compose.ui.graphics.Co
                 if (m != null) {
                     Row {
                         Text("${m.groupValues[1]}. ", color = baseColor)
-                        Text(
+                        ProseText(
                             annotateInline(m.groupValues[2], baseColor),
                             color = baseColor,
                             style = MaterialTheme.typography.bodyMedium
                         )
                     }
                 } else {
-                    Text(annotateInline(raw, baseColor), color = baseColor)
+                    ProseText(annotateInline(raw, baseColor), color = baseColor)
                 }
             }
             trimmed.isEmpty() -> Spacer(Modifier.padding(vertical = 3.dp))
-            else -> Text(
+            else -> ProseText(
                 annotateInline(raw, baseColor),
                 color = baseColor,
                 style = MaterialTheme.typography.bodyMedium
@@ -278,7 +284,7 @@ private fun RowScope.TableCell(
     header: Boolean,
     last: Boolean
 ) {
-    Text(
+    ProseText(
         annotateInline(text, baseColor),
         style = if (header) MaterialTheme.typography.labelMedium
                 else MaterialTheme.typography.bodySmall,
@@ -287,6 +293,48 @@ private fun RowScope.TableCell(
             .weight(1f)
             .padding(horizontal = 8.dp, vertical = 6.dp)
     )
+}
+
+// Text with clickable URL annotations (`URL_TAG`). On tap, launches ACTION_VIEW
+// for the URL under the touch point. Falls back to a plain Text when the string
+// has no URL annotations so regular prose doesn't eat long-press / selection
+// gestures unnecessarily.
+@Composable
+private fun ProseText(
+    text: AnnotatedString,
+    modifier: Modifier = Modifier,
+    style: TextStyle = LocalTextStyle.current,
+    color: androidx.compose.ui.graphics.Color = androidx.compose.ui.graphics.Color.Unspecified
+) {
+    val hasLinks = text.getStringAnnotations(URL_TAG, 0, text.length).isNotEmpty()
+    if (!hasLinks) {
+        Text(text, modifier = modifier, style = style, color = color)
+        return
+    }
+    val context = LocalContext.current
+    val effectiveStyle = if (color == androidx.compose.ui.graphics.Color.Unspecified) style
+        else style.copy(color = color)
+    ClickableText(
+        text = text,
+        modifier = modifier,
+        style = effectiveStyle,
+        onClick = { offset ->
+            text.getStringAnnotations(URL_TAG, offset, offset).firstOrNull()
+                ?.let { ann -> openUrl(context, ann.item) }
+        }
+    )
+}
+
+private fun openUrl(context: Context, url: String) {
+    runCatching {
+        val normalised = if (url.startsWith("http://") || url.startsWith("https://")) url
+            else "https://$url"
+        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(normalised))
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        context.startActivity(intent)
+    }.onFailure {
+        Toast.makeText(context, "Cannot open link: $url", Toast.LENGTH_SHORT).show()
+    }
 }
 
 private sealed interface Segment {
@@ -354,10 +402,9 @@ private fun annotateInline(line: String, baseColor: androidx.compose.ui.graphics
                 c == '_' || (c == '*' && (i == 0 || line[i - 1] != '*')) -> {
                     val end = line.indexOf(c, i + 1)
                     if (end > i) {
-                        withStyle(
-                            SpanStyle(fontWeight = FontWeight.Normal,
-                                textDecoration = TextDecoration.None)
-                        ) { append(line.substring(i + 1, end)) }
+                        withStyle(SpanStyle(fontStyle = FontStyle.Italic)) {
+                            append(line.substring(i + 1, end))
+                        }
                         i = end + 1
                     } else { append(c); i++ }
                 }
@@ -366,20 +413,62 @@ private fun annotateInline(line: String, baseColor: androidx.compose.ui.graphics
                     val paren = if (close > 0 && close + 1 < line.length && line[close + 1] == '(')
                         line.indexOf(')', close + 2) else -1
                     if (close > 0 && paren > 0) {
+                        val label = line.substring(i + 1, close)
+                        val url = line.substring(close + 2, paren)
+                        pushStringAnnotation(tag = URL_TAG, annotation = url)
                         withStyle(
                             SpanStyle(
-                                color = baseColor,
+                                color = MaterialThemeLink,
                                 textDecoration = TextDecoration.Underline
                             )
-                        ) { append(line.substring(i + 1, close)) }
+                        ) { append(label) }
+                        pop()
                         i = paren + 1
                     } else { append(c); i++ }
+                }
+                // Bare URLs (http://, https://).
+                c == 'h' && line.startsWith("http", i) && run {
+                    val rest = line.substring(i)
+                    rest.startsWith("http://") || rest.startsWith("https://")
+                } -> {
+                    val end = findUrlEnd(line, i)
+                    val url = line.substring(i, end)
+                    pushStringAnnotation(tag = URL_TAG, annotation = url)
+                    withStyle(
+                        SpanStyle(
+                            color = MaterialThemeLink,
+                            textDecoration = TextDecoration.Underline
+                        )
+                    ) { append(url) }
+                    pop()
+                    i = end
                 }
                 else -> { append(c); i++ }
             }
         }
     }
 }
+
+private fun findUrlEnd(line: String, start: Int): Int {
+    var j = start
+    while (j < line.length) {
+        val ch = line[j]
+        // Break on whitespace, closing brackets, and trailing punctuation that
+        // is almost never part of a URL.
+        if (ch.isWhitespace() || ch in ")]>\"'`") break
+        j++
+    }
+    // Strip trailing . , ; : ! ? — common sentence punctuation right after URLs.
+    while (j > start + 1 && line[j - 1] in ".,;:!?") j--
+    return j
+}
+
+private const val URL_TAG = "URL"
+
+// Link colour — kept as a top-level constant so annotateInline stays pure (no
+// @Composable context needed). Matches Material 3 primary on both themes
+// reasonably well; the underline decoration carries most of the affordance.
+private val MaterialThemeLink = androidx.compose.ui.graphics.Color(0xFF4285F4)
 
 private fun copyToClipboard(context: Context, text: String) {
     val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
