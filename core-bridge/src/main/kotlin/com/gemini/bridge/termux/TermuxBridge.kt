@@ -42,13 +42,15 @@ class TermuxBridge(private val appContext: Context) {
     suspend fun run(
         command: String,
         workdir: String? = null,
-        timeoutMs: Long = 12_000
+        timeoutMs: Long = 12_000,
+        background: Boolean = false
     ): Result {
         if (!isInstalled()) return Result(
             false, -1, "",
             "Termux is not installed. Install it from F-Droid then enable RUN_COMMAND."
         )
-        val first = dispatch(command, workdir, timeoutMs)
+        val effective = if (background) wrapBackground(command) else command
+        val first = dispatch(effective, workdir, timeoutMs)
         if (workdir == null || !isWorkdirDenied(first)) return first
 
         // Termux refused the WORKDIR because it lacks shared-storage access.
@@ -62,7 +64,7 @@ class TermuxBridge(private val appContext: Context) {
         if (!autoSetupAttempted) {
             autoSetupAttempted = true
             triggerStorageBootstrap()
-            val fallback = dispatch(command, null, timeoutMs)
+            val fallback = dispatch(effective, null, timeoutMs)
             val hint = "note: Termux couldn't read $workdir yet. Termux was " +
                 "just brought to the foreground and `termux-setup-storage` is " +
                 "on your clipboard — long-press in Termux, tap Paste, press " +
@@ -74,7 +76,7 @@ class TermuxBridge(private val appContext: Context) {
 
         // Already tried auto-setup earlier — user likely skipped it. Keep
         // working by falling back to $HOME and surface the manual fix.
-        val fallback = dispatch(command, null, timeoutMs)
+        val fallback = dispatch(effective, null, timeoutMs)
         val hint = "note: Termux still can't read $workdir. Open Termux and " +
             "run `termux-setup-storage`, then accept the Android permission " +
             "dialog. Until then, prefer the workspace file tools over shell " +
@@ -206,6 +208,37 @@ class TermuxBridge(private val appContext: Context) {
     private fun <T> CancellableContinuation<T>.resumeSafely(value: T) {
         if (isActive) resume(value)
     }
+
+    // Wrap a long-running command so bash exits immediately and Termux
+    // broadcasts exit=0 within milliseconds, while the actual process keeps
+    // running in the background. stdout/stderr go to a log file under
+    // $HOME/.gemini-bg/ so the model can tail it later via a normal shell
+    // call (e.g. `tail -n 80 $LOG`). disown detaches the child so it
+    // survives Termux's RunCommandService tearing down.
+    private fun wrapBackground(command: String): String {
+        val id = UUID.randomUUID().toString().take(8)
+        val quoted = bashSingleQuote(command)
+        return buildString {
+            append("mkdir -p \"\$HOME/.gemini-bg\" && ")
+            append("LOG=\"\$HOME/.gemini-bg/run-$id.log\" && ")
+            append("nohup bash -lc $quoted > \"\$LOG\" 2>&1 & ")
+            append("PID=\$! && ")
+            append("disown 2>/dev/null || true ; ")
+            append("sleep 0.2 ; ")
+            append("if kill -0 \$PID 2>/dev/null ; then ")
+            append("  echo \"[background] started pid=\$PID log=\$LOG\" ; ")
+            append("else ")
+            append("  echo \"[background] process died immediately; last log lines:\" ; ")
+            append("  tail -n 30 \"\$LOG\" 2>/dev/null || true ; ")
+            append("  exit 1 ; ")
+            append("fi")
+        }
+    }
+
+    // Escape a string for safe embedding inside a bash single-quoted word.
+    // Single quote → close quote, escaped quote, reopen quote.
+    private fun bashSingleQuote(s: String): String =
+        "'" + s.replace("'", "'\\''") + "'"
 
     companion object {
         private const val TERMUX_PKG = "com.termux"

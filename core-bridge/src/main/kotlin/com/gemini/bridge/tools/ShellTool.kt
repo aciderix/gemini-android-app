@@ -25,22 +25,35 @@ class RunShellCommandTool(
             "directory when it is reachable from Termux (the device path is shown in the " +
             "system instruction); otherwise they run in Termux's \$HOME, so use the file " +
             "tools to read/write workspace files. Requires Termux installed with the " +
-            "RUN_COMMAND permission granted. Returns combined stdout and stderr.",
+            "RUN_COMMAND permission granted. Returns combined stdout and stderr.\n\n" +
+            "Foreground commands must return within ~12 s or the call fails with a " +
+            "timeout. For anything long-running (dev/web servers, watchers, daemons), " +
+            "set `background: true` — the command is detached with nohup, its output " +
+            "is redirected to a log file under `~/.gemini-bg/`, and the result returns " +
+            "immediately with the PID and log path. You can then check progress with " +
+            "`tail -n 80 <log>` and stop the process with `kill <pid>`.",
         category = ToolCategory.SHELL,
         destructive = true,
         parameters = objectParams(
             "command" to stringProp("Command line to execute (e.g. `python script.py`)"),
+            "background" to booleanProp(
+                "Run in background. Use for servers/daemons/watchers that never return " +
+                    "on their own. Returns once the process is confirmed alive (~200 ms), " +
+                    "with its PID and log path."
+            ),
             required = listOf("command")
         )
     )
 
     override suspend fun execute(call: ToolCall): ToolCallResult = runCatching {
         val command = call.arguments["command"] as? String ?: error("command is required")
+        val background = call.arguments["background"] as? Boolean ?: false
         val workdir = workspace.absolutePath()
         val reason = workspace.unreachableReason()
-        val r = termux.run(command, workdir)
+        val r = termux.run(command, workdir, background = background)
         val body = buildString {
             append("exit=").append(r.exitCode)
+            if (background) append("  mode=background")
             if (workdir != null) append("  cwd=").append(workdir)
             else append("  cwd=~  (workspace not reachable from Termux)")
             append('\n')
