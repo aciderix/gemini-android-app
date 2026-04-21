@@ -449,6 +449,7 @@ fun ChatViewModel.exportAsMarkdown(): String {
                     sb.append("```\n").append(res.output.trim()).append("\n```\n\n")
                 }
             }
+            MessageRole.SYSTEM -> Unit
         }
     }
     return sb.toString()
