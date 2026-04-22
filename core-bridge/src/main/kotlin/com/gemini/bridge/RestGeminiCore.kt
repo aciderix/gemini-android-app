@@ -591,11 +591,17 @@ class RestGeminiCore(
     private fun buildRequestBody(): String {
         val contents = JSONArray()
         turns.forEach { contents.put(it) }
-        val body = JSONObject()
-            .put("systemInstruction", buildSystemInstruction())
-            .put("contents", contents)
-            .put("tools", buildToolsJson())
-        if (modelEmitsImages(model)) {
+        val body = JSONObject().put("contents", contents)
+        val emitsImages = modelEmitsImages(model)
+        val supportsTools = modelSupportsFunctionCalling(model)
+        // Gemma + image-only models reject systemInstruction on the generateContent
+        // endpoint ("400: system_instruction is not supported"). Gemini 2.5+ is
+        // fine and benefits from the workspace/tool preamble.
+        if (supportsTools) {
+            body.put("systemInstruction", buildSystemInstruction())
+            body.put("tools", buildToolsJson())
+        }
+        if (emitsImages) {
             body.put(
                 "generationConfig",
                 JSONObject().put(
@@ -737,8 +743,22 @@ class RestGeminiCore(
     }
 
     private fun tryExtractError(body: String): String? = runCatching {
-        JSONObject(body).optJSONObject("error")?.optString("message")
+        val raw = JSONObject(body).optJSONObject("error")?.optString("message") ?: return@runCatching null
+        if (looksLikeImageFreeTierQuota(raw)) {
+            raw + "\n\n" +
+                "Image generation models (Imagen, Nano Banana / *-image) are " +
+                "not included in the Gemini free tier (limit 0). Enable " +
+                "billing on the Google Cloud project linked to your API key: " +
+                "https://console.cloud.google.com/billing — then retry."
+        } else raw
     }.getOrNull()
+
+    private fun looksLikeImageFreeTierQuota(message: String): Boolean {
+        val m = message.lowercase()
+        return m.contains("quota") &&
+            m.contains("limit: 0") &&
+            (m.contains("-image") || m.contains("imagen"))
+    }
 
     private fun mapToJson(map: Map<String, Any?>): JSONObject {
         val obj = JSONObject()
@@ -808,5 +828,20 @@ class RestGeminiCore(
          */
         fun modelEmitsImages(modelName: String): Boolean =
             modelName.contains("-image", ignoreCase = true)
+
+        /**
+         * True when the model accepts `tools` + `systemInstruction` in the
+         * request body. Gemma models and image-only models do not (the API
+         * returns 400). Gemini text/multimodal models do.
+         */
+        fun modelSupportsFunctionCalling(modelName: String): Boolean {
+            val lower = modelName.lowercase()
+            if (lower.startsWith("gemma")) return false
+            if (lower.startsWith("imagen")) return false
+            // `*-image*` chat models (Nano Banana etc.) reject tools today —
+            // they only produce images + short captions.
+            if (lower.contains("-image")) return false
+            return true
+        }
     }
 }
