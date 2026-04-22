@@ -11,129 +11,118 @@
 
 > 🇬🇧 English · [🇫🇷 Version française](fr/README.md)
 
-A **native Gemini client for Android** — streaming chat with *function
-calling*, built-in file tools (SAF), Termux bridge for shell commands, and
-encrypted local persistence. Written in Kotlin + Jetpack Compose, with no
-dependency on any official Google app. The goal: reproduce the
-[Gemini CLI](https://github.com/google-gemini/gemini-cli) experience in a
-standalone APK that fits in your pocket.
+A **native Gemini coding client for Android** — not a wrapper around the
+official Google app, not a thin webview. A real client that turns your
+phone into a pocket coding workstation: the model reads and writes files,
+runs shell commands (compiles, tests, starts servers), generates images,
+and holds context across hours of conversation. Written in Kotlin +
+Jetpack Compose.
 
-![Chat preview](docs/screenshots/chat.png)
+<p align="center">
+  <img src="docs/screenshot.jpg" alt="Chat in action: function calling + tool approval" width="360" />
+</p>
 
-## 📋 Table of contents
+## 🎯 What you can actually do with it
 
-- [Features](#-features)
-- [Prerequisites](#-prerequisites)
-- [Installation](#-installation)
-- [Usage](#-usage)
-- [Architecture](#-architecture)
-- [Advanced configuration](#-advanced-configuration)
-- [Gemini compatibility](#-gemini-compatibility)
-- [Roadmap](#-roadmap)
-- [Contributing](#-contributing)
-- [License](#-license)
-- [Credits](#-credits)
+- **Ask the model to modify a project, not just describe one.** It opens
+  files in your workspace (SAF or local folder), edits them literally,
+  and shows you a diff. You approve once — or flip auto-approve and let
+  it iterate on its own.
+- **Run shell commands from the conversation.** The Termux bridge drops
+  the model into your workspace directory: `python foo.py`, `npm test`,
+  `cargo build`, `pip install …`, `curl`, `git status`. Backgrounded
+  processes (servers, watchers) keep running when the model's turn ends.
+- **Generate images inline.** Both **Imagen** (dedicated picker in
+  Settings → Model) and **Gemini 2.5 Flash Image** ("Nano Banana",
+  auto-enabled when you pick it in the top-bar dropdown) save their
+  outputs to the chat bubble as thumbnails.
+- **Send images for the model to analyse.** Tap the image icon, pick any
+  photo from the gallery — it's sent as `inlineData` base64 in the next
+  turn. The model can OCR, describe, or reason about the image.
+- **Survive long sessions.** The app reports live token usage and
+  auto-compresses the conversation into a fresh summary once the context
+  window fills up, so you keep talking without 400 errors.
+- **Autosave every turn.** Close the app, come back three days later,
+  the conversation is exactly where you left it. Name and save snapshots
+  from the drawer for archive.
+- **Export anywhere.** Drawer → Export as Markdown opens the Android
+  share sheet — send the full conversation (text, code blocks, tables,
+  image references) to any app.
 
-## ✨ Features
+## ✨ Feature breakdown
 
-- **Streaming Gemini chat** over `generativelanguage.googleapis.com`, with
-  the API key stored in `EncryptedSharedPreferences`.
-- **Native file tools** via SAF (`read_file`, `write_file`, `edit_file`,
-  `delete_file`, `list_directory`, `glob_files`, `grep`) — the model
-  decides on its own when to call them.
-- **Termux bridge** for shell commands (`run_shell_command`) with a
-  consistent workspace path: `python foo.py` finds the file `write_file`
-  just wrote.
-- **Approval for destructive tools** — you confirm every write / delete /
-  shell command, or flip "Auto-approve" once.
-- **Autosave** of the current conversation, restored on next launch.
-- **Auto-compression** at X % of the context window (configurable
-  threshold) — the session is summarised automatically before it saturates.
-- **Dynamic model discovery** via `/v1beta/models` (no hard-coded list).
-- **Markdown rendering** in chat: headings, lists, code (inline +
-  fenced), links, bold/italic, GFM tables, blockquotes, task lists,
-  horizontal rules, image attachments.
-- **Diff viewer** for `edit_file` results.
-- **Markdown export** of the conversation to any app (system share
-  sheet).
+- **Streaming chat** over `generativelanguage.googleapis.com`. API key
+  encrypted locally in `EncryptedSharedPreferences`. No server in the
+  middle.
+- **Function calling** with 9 built-in tools:
+  `read_file`, `write_file`, `edit_file`, `delete_file`,
+  `list_directory`, `glob_files`, `grep`, `run_shell_command`
+  (foreground or background), `generate_image` (Imagen). The model
+  decides when to call them.
+- **Safety on destructive tools**: every `write_file` / `edit_file` /
+  `delete_file` / shell command shows an approval dialog with arguments
+  and a diff (for edits) before it runs. One-tap "Auto-approve" toggle
+  for trusted sessions.
+- **Rich markdown rendering**: headings, numbered / bullet / task lists,
+  inline + fenced code with a copy button, **bold**, *italic*, GFM
+  tables, blockquotes, horizontal rules. Bare `https://…` URLs and
+  `[label](url)` links are clickable and open in your browser.
+- **Top-bar quick pickers**: tap the model name to switch models
+  without opening Settings. Tap the workspace folder to "Open folder"
+  (system Files app) or "Change folder" (SAF picker).
+- **Multimodal input**: attach one or more images per turn; thumbnails
+  render in the user bubble and persist across reloads. 15 MB cap per
+  image.
+- **Dynamic model list**: fetched live from `/v1beta/models`, no
+  hardcoded catalog. Custom model IDs accepted in Settings.
+- **Diff viewer** in the tool-result bubble for `edit_file`.
+- **Two languages**: EN / FR interface, full parity.
 
 ## 🛠 Prerequisites
 
-Before you start, make sure you have:
-
-- **Android 8.0+** (API 26+) on your device.
-- A **Gemini API key** (free): <https://aistudio.google.com/app/apikey>.
-- **Optional** — [Termux](https://f-droid.org/packages/com.termux/) from
-  F-Droid or [the GitHub releases](https://github.com/termux/termux-app/releases)
-  (⚠️ **not** from the Play Store — abandoned since 2020).
+- **Android 8.0+** (API 26+).
+- A **Gemini API key** (free tier works for chat; image generation
+  requires billing on the associated Google Cloud project):
+  <https://aistudio.google.com/app/apikey>.
+- **Optional** — [Termux](https://f-droid.org/packages/com.termux/)
+  from F-Droid or [the GitHub releases](https://github.com/termux/termux-app/releases)
+  (⚠️ **not** the Play Store version, abandoned since 2020) if you want
+  shell command execution.
 
 To build from source:
-
-- **Android SDK** (API 34 minimum).
-- **JDK 17** on `JAVA_HOME`.
+- **Android SDK** (API 34+), **JDK 17** on `JAVA_HOME`.
 
 ## 🚀 Installation
 
 ### Option 1: pre-built APK
 
-Download the latest debug APK from the
-[Releases page](https://github.com/aciderix/gemini-android-app/releases)
-and install it. It's debug-signed — replace with a release keystore
-before public distribution.
+Download the latest APK from the
+[Releases page](https://github.com/aciderix/gemini-android-app/releases).
+Both debug-signed and release-signed APKs are published on each tag.
 
 ### Option 2: build from source
 
-1. Clone the repo:
-   ```bash
-   git clone https://github.com/aciderix/gemini-android-app
-   cd gemini-android-app
-   ```
+```bash
+git clone https://github.com/aciderix/gemini-android-app
+cd gemini-android-app
+./gradlew :app:assembleDebug
+adb install app/build/outputs/apk/debug/app-debug.apk
+```
 
-2. Run the Gradle build:
-   ```bash
-   ./gradlew :app:assembleDebug
-   ```
+## 💻 First-run setup
 
-3. The APK lands in:
-   ```
-   app/build/outputs/apk/debug/app-debug.apk
-   ```
-
-4. Install it on the device (USB or `adb install`):
-   ```bash
-   adb install app/build/outputs/apk/debug/app-debug.apk
-   ```
-
-## 💻 Usage
-
-On first launch:
-
-1. **Settings → Account**: paste your Gemini API key.
-2. **Settings → Workspace → Pick folder**: choose a folder under
-   `/storage/emulated/0/` (avoid `/Android/data/…`, unreachable by Termux).
-3. **Settings → Termux shell** (optional, 3 steps): enable the shell
-   bridge if you want `run_shell_command` to work.
-
-Then start chatting — the model will use the file and shell tools as
-needed.
-
-### Examples
-
-**Read a file from the workspace**:
-> *"Open `notes.md` and summarise it."*
-
-**Write + run a Python script**:
-> *"Write a `hello.py` script that prints 'Hello', then run it."*
-
-The app will invoke `write_file` then `run_shell_command` via Termux,
-with approval before each destructive action (toggleable).
-
-**Attach an image**: tap the 🖼️ icon in the composer and pick one from
-the system picker. The image is sent as `inlineData` (base64) in the
-next multimodal request.
-
-**Export the conversation**: **burger menu → Export as Markdown** —
-opens the system share sheet with the chat in Markdown format.
+1. **Settings → Account**: paste your Gemini API key. It's stored
+   encrypted on device.
+2. **Top-bar folder name → Change folder**: pick a workspace under
+   `/storage/emulated/0/` (avoid `/Android/data/…`, unreachable to
+   Termux). The file tools operate relative to this folder.
+3. **Settings → Termux shell** (optional, one-time): follow the 3-step
+   guide to allow `run_shell_command`. You need Termux installed and
+   `termux-setup-storage` run once.
+4. **Top-bar model name**: tap it to pick a model. Use
+   `gemini-2.5-flash` for everyday coding, `gemini-2.5-pro` for harder
+   reasoning, `gemini-2.5-flash-image-preview` if you want inline image
+   generation (requires billing).
 
 ## 🧱 Architecture
 
@@ -154,68 +143,57 @@ All network traffic flows through `RestGeminiCore`, which emits
 
 ### Auto-compression
 
-The model reports `usageMetadata.totalTokenCount` on every response. As
-soon as `total / inputTokenLimit` crosses the threshold (default **70 %**),
+The model reports `usageMetadata.totalTokenCount` on every response.
+Once `total / inputTokenLimit` crosses the threshold (default **70 %**),
 the conversation is summarised into a fresh session in the background —
-a non-blocking banner shows during the operation.
+a non-blocking banner signals the operation.
 
-Tune the threshold in **Settings → Auto-compression** (50 % → 95 %).
+Tune the threshold in **Settings → Auto-compression** (50 % → 95 %) or
+disable it entirely.
 
-### Autosave
+### Image generation
 
-On by default. The live session is persisted to
-`filesDir/chat-current.json` after every turn, and restored on launch
-(as long as no other chat is loaded). Independent of named chats, which
-are saved manually from the list.
+- **Imagen** (`imagen-3.0-generate-002` by default, picker in
+  Settings → Model) — called via the `generate_image` function tool
+  when the model decides one is needed.
+- **Gemini 2.5 Flash Image / Nano Banana** — pick it as the chat
+  model, the app automatically enables `responseModalities: [TEXT, IMAGE]`
+  on every request so the model returns images inline.
+- Images are saved to `<filesDir>/attachments/` and render as
+  thumbnails in the bubble; chat exports and reloads preserve them.
 
-Toggle in **Settings → Autosave**.
+Both image paths require billing on the Google Cloud project linked to
+your API key — the Gemini free tier has a quota of **0** for these
+models.
 
-### Image attachments
+### Background shell commands
 
-Via the 🖼️ icon in the composer — the image is encoded to base64 and
-sent as `inlineData` on the next user turn. MIME detected via
-`ContentResolver`. 15 MB cap per image.
+`run_shell_command` accepts a `background: true` flag so the model can
+start long-running processes (web servers, file watchers, training
+loops) without Termux's 12-second IPC timeout killing them. Output
+lands in `$HOME/.gemini-bg/run-<id>.log`, tailable on demand.
 
 ## 🧪 Gemini compatibility
 
 Tested with:
 
-- `gemini-2.5-pro` / `gemini-2.5-flash`
+- `gemini-2.5-pro` / `gemini-2.5-flash` / `gemini-2.5-flash-image-preview`
 - `gemini-2.0-flash`
 - `gemini-1.5-pro` / `gemini-1.5-flash`
 
-The **Settings → Model** picker lists every model on your account that
-supports `generateContent`.
-
-## 🗺 Roadmap
-
-See [`docs/ROADMAP.md`](docs/ROADMAP.md) for details (in French).
-
-Main open items:
-
-- [ ] Release keystore + signed CI.
-- [ ] Unit tests on the tool parser and `Workspace`.
-- [ ] R8 / minification in release.
-- [ ] Fast multi-chat switcher.
+**Gemma** models (`gemma-2-*`, `gemma-3-*`) appear in the picker but
+don't support function calling — they'll work for pure chat but the
+tool stack won't be available.
 
 ## 🤝 Contributing
 
-Contributions are welcome:
+Contributions welcome:
 
 1. **Fork** the project.
-2. Create a branch:
-   ```bash
-   git checkout -b feature/my-feature
-   ```
-3. **Commit** with a clear message:
-   ```bash
-   git commit -m "Add my feature"
-   ```
-4. **Push** your branch:
-   ```bash
-   git push origin feature/my-feature
-   ```
-5. Open a **Pull Request**.
+2. Create a branch: `git checkout -b feature/my-feature`.
+3. Commit with a clear message: `git commit -m "Add my feature"`.
+4. Push: `git push origin feature/my-feature`.
+5. Open a Pull Request.
 
 ### Dev setup
 
