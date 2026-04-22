@@ -1,4 +1,7 @@
-# Gemini Android 🤖
+<h1>
+  <img src="../docs/logo_gemini.png" alt="" height="32" align="top" />
+  Gemini Android
+</h1>
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](../LICENSE)
 [![Kotlin](https://img.shields.io/badge/Kotlin-1.9.24-7F52FF.svg?logo=kotlin&logoColor=white)](https://kotlinlang.org/)
