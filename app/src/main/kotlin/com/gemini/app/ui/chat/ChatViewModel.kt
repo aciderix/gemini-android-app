@@ -55,8 +55,14 @@ class ChatViewModel(private val core: RestGeminiCore) : ViewModel() {
     private val _workspaceReason = MutableStateFlow(core.workspace.unreachableReason())
     val workspaceReason: StateFlow<String?> = _workspaceReason.asStateFlow()
 
+    private val _workspaceUri = MutableStateFlow(core.workspace.rootUri()?.toString())
+    val workspaceUri: StateFlow<String?> = _workspaceUri.asStateFlow()
+
     private val _availableModels = MutableStateFlow(core.listModels())
     val availableModels: StateFlow<List<String>> = _availableModels.asStateFlow()
+
+    private val _imagenModel = MutableStateFlow(core.imagenModel())
+    val imagenModel: StateFlow<String> = _imagenModel.asStateFlow()
 
     private val _thinking = MutableStateFlow<String?>(null)
     val thinking: StateFlow<String?> = _thinking.asStateFlow()
@@ -347,6 +353,11 @@ class ChatViewModel(private val core: RestGeminiCore) : ViewModel() {
         _model.value = core.currentModel()
     }
 
+    fun setImagenModel(name: String) {
+        core.setImagenModel(name)
+        _imagenModel.value = core.imagenModel()
+    }
+
     fun setAutoApprove(enabled: Boolean) {
         core.setAutoApprove(enabled)
         _autoApprove.value = enabled
@@ -360,6 +371,7 @@ class ChatViewModel(private val core: RestGeminiCore) : ViewModel() {
                     _workspaceLabel.value = core.workspace.rootLabel()
                     _workspacePath.value = core.workspace.absolutePath()
                     _workspaceReason.value = core.workspace.unreachableReason()
+                    _workspaceUri.value = core.workspace.rootUri()?.toString()
                 }
             }
         }

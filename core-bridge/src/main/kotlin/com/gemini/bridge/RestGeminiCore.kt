@@ -83,6 +83,8 @@ class RestGeminiCore(
     private val defaultModel: String = DEFAULT_MODEL
 ) : GeminiCore {
 
+    private val appContext: Context = appContext.applicationContext
+
     private val registry = ToolRegistry().apply {
         register(ReadFileTool(workspace))
         register(WriteFileTool(workspace))
@@ -92,6 +94,15 @@ class RestGeminiCore(
         register(GlobTool(workspace))
         register(GrepTool(workspace))
         register(RunShellCommandTool(termux, workspace))
+        register(
+            GenerateImageTool(
+                getApiKey = { this@RestGeminiCore.apiKey },
+                getModel = { prefs.imagenModel ?: DEFAULT_IMAGEN_MODEL },
+                persist = { id, bytes, mime ->
+                    persistAttachmentBytes(id, bytes, mime)
+                }
+            )
+        )
     }
 
     private var apiKey: String = ""
@@ -167,6 +178,32 @@ class RestGeminiCore(
     fun isAutoCompressEnabled(): Boolean = prefs.autoCompressEnabled
     fun setAutoCompressEnabled(enabled: Boolean) { prefs.autoCompressEnabled = enabled }
     fun autoCompressThreshold(): Float = prefs.autoCompressThreshold
+
+    fun imagenModel(): String = prefs.imagenModel ?: DEFAULT_IMAGEN_MODEL
+    fun setImagenModel(name: String) {
+        prefs.imagenModel = name.ifBlank { DEFAULT_IMAGEN_MODEL }
+    }
+
+    /**
+     * Save raw image bytes to app-owned storage for later display in a chat
+     * bubble. Called by the response parser (for model-generated images) and
+     * by the GenerateImageTool (for Imagen outputs). Returns the absolute path
+     * that can be stored in `GeminiMessage.attachmentPaths`.
+     */
+    fun persistAttachmentBytes(id: String, bytes: ByteArray, mime: String): String? = runCatching {
+        val ext = when {
+            mime.contains("png") -> "png"
+            mime.contains("webp") -> "webp"
+            mime.contains("gif") -> "gif"
+            mime.contains("heic") -> "heic"
+            mime.contains("heif") -> "heif"
+            else -> "jpg"
+        }
+        val dir = java.io.File(appContext.filesDir, "attachments").also { it.mkdirs() }
+        val file = java.io.File(dir, "$id.$ext")
+        file.writeBytes(bytes)
+        file.absolutePath
+    }.getOrNull()
     fun setAutoCompressThreshold(fraction: Float) {
         prefs.autoCompressThreshold = fraction.coerceIn(0.5f, 0.95f)
     }
@@ -414,7 +451,8 @@ class RestGeminiCore(
                 isUser = false,
                 timestamp = System.currentTimeMillis(),
                 role = MessageRole.TOOL,
-                toolResult = result
+                toolResult = result,
+                attachmentPaths = result.attachmentPaths
             )
         )
         _events.tryEmit(GeminiEvent.ToolCallCompleted(result))
@@ -495,6 +533,42 @@ class RestGeminiCore(
                                 val id = "$name-${System.nanoTime()}-${calls.size}"
                                 calls.add(ToolCall(id, name, jsonToMap(args)))
                             }
+                            part.has("inlineData") -> {
+                                // Native multimodal output (e.g.
+                                // `gemini-2.5-flash-image-preview`): the model
+                                // returns image bytes alongside text parts.
+                                // Persist to disk so the bubble can show a
+                                // thumbnail and the file survives reload.
+                                val inline = part.getJSONObject("inlineData")
+                                val mime = inline.optString("mimeType", "image/png")
+                                val b64 = inline.optString("data").orEmpty()
+                                if (b64.isNotBlank()) {
+                                    val decoded = runCatching {
+                                        android.util.Base64.decode(b64, android.util.Base64.DEFAULT)
+                                    }.getOrNull()
+                                    val path = decoded?.let { bytes ->
+                                        persistAttachmentBytes("gen-${nextId()}", bytes, mime)
+                                    }
+                                    if (path != null) {
+                                        if (liveMessage == null) {
+                                            liveMessage = GeminiMessage(
+                                                id = nextId(),
+                                                text = accumulated.toString(),
+                                                isUser = false,
+                                                timestamp = System.currentTimeMillis(),
+                                                role = MessageRole.MODEL,
+                                                attachmentPaths = listOf(path)
+                                            )
+                                            addUiMessage(liveMessage!!)
+                                        } else {
+                                            liveMessage = liveMessage!!.copy(
+                                                attachmentPaths = liveMessage!!.attachmentPaths + path
+                                            )
+                                            replaceUiMessage(liveMessage!!)
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -516,11 +590,20 @@ class RestGeminiCore(
     private fun buildRequestBody(): String {
         val contents = JSONArray()
         turns.forEach { contents.put(it) }
-        return JSONObject()
+        val body = JSONObject()
             .put("systemInstruction", buildSystemInstruction())
             .put("contents", contents)
             .put("tools", buildToolsJson())
-            .toString()
+        if (modelEmitsImages(model)) {
+            body.put(
+                "generationConfig",
+                JSONObject().put(
+                    "responseModalities",
+                    JSONArray().put("TEXT").put("IMAGE")
+                )
+            )
+        }
+        return body.toString()
     }
 
     private fun buildSystemInstruction(): JSONObject {
@@ -697,14 +780,32 @@ class RestGeminiCore(
     companion object {
         private const val TAG = "RestGeminiCore"
         const val DEFAULT_MODEL = "gemini-2.5-flash"
+        const val DEFAULT_IMAGEN_MODEL = "imagen-3.0-generate-002"
         // Used as a static fallback before the API model-discovery call lands.
         // The real model list is fetched live from /v1beta/models.
         val AVAILABLE_MODELS = listOf(
             "gemini-2.5-pro",
             "gemini-2.5-flash",
+            "gemini-2.5-flash-image-preview",
             "gemini-2.0-flash",
             "gemini-1.5-pro-latest",
             "gemini-1.5-flash-latest"
         )
+        // Imagen variants we expose in the settings picker. Access depends on
+        // the API key's quota — Imagen is billed separately from Gemini.
+        val AVAILABLE_IMAGEN_MODELS = listOf(
+            "imagen-3.0-generate-002",
+            "imagen-3.0-fast-generate-001",
+            "imagen-4.0-generate-preview-06-06"
+        )
+
+        /**
+         * True when the selected chat model is known to return inline image
+         * data in its response (triggers `responseModalities = [TEXT, IMAGE]`).
+         * Kept as a name-based heuristic so newly released image-output models
+         * light up automatically once the user picks them.
+         */
+        fun modelEmitsImages(modelName: String): Boolean =
+            modelName.contains("-image", ignoreCase = true)
     }
 }

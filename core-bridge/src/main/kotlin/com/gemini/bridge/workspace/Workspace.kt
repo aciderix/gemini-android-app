@@ -29,6 +29,13 @@ class Workspace(private val context: Context) {
 
     fun rootLabel(): String = label
 
+    /**
+     * URI of the current root so the UI can offer "open in files app".
+     * `file://...` for the default internal folder, `content://...` (tree) for
+     * a user-picked SAF location. Null only before init() has run.
+     */
+    fun rootUri(): Uri? = root?.uri
+
     fun setFile(file: File) {
         val created = file.apply { if (!exists()) mkdirs() }
         root = DocumentFile.fromFile(created)

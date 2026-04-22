@@ -97,8 +97,10 @@ fun SettingsSheet(
     val compressThreshold by viewModel.autoCompressThreshold.collectAsState()
     val tokenUsage by viewModel.tokenUsage.collectAsState()
     val autoSave by viewModel.autoSaveEnabled.collectAsState()
+    val imagenModel by viewModel.imagenModel.collectAsState()
 
     var customModel by remember { mutableStateOf("") }
+    var customImagenModel by remember { mutableStateOf("") }
     var expanded by remember { mutableStateOf(emptySet<String>()) }
 
     val folderLauncher = rememberLauncherForActivityResult(
@@ -258,6 +260,81 @@ fun SettingsSheet(
                         }
                     ) { Text("Use") }
                 }
+
+                Spacer(Modifier.height(16.dp))
+                Text(
+                    "Image generation model (Imagen)",
+                    style = MaterialTheme.typography.labelMedium
+                )
+                Spacer(Modifier.height(4.dp))
+                var imagenDropdownOpen by remember { mutableStateOf(false) }
+                ExposedDropdownMenuBox(
+                    expanded = imagenDropdownOpen,
+                    onExpandedChange = { imagenDropdownOpen = it }
+                ) {
+                    OutlinedTextField(
+                        value = imagenModel,
+                        onValueChange = {},
+                        readOnly = true,
+                        label = { Text("Imagen model") },
+                        trailingIcon = {
+                            ExposedDropdownMenuDefaults.TrailingIcon(expanded = imagenDropdownOpen)
+                        },
+                        colors = ExposedDropdownMenuDefaults.outlinedTextFieldColors(),
+                        modifier = Modifier
+                            .menuAnchor()
+                            .fillMaxWidth()
+                    )
+                    DropdownMenu(
+                        expanded = imagenDropdownOpen,
+                        onDismissRequest = { imagenDropdownOpen = false }
+                    ) {
+                        com.gemini.bridge.RestGeminiCore.AVAILABLE_IMAGEN_MODELS.forEach { name ->
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        name,
+                                        style = if (name == imagenModel)
+                                            MaterialTheme.typography.bodyMedium.copy(
+                                                fontWeight = androidx.compose.ui.text.font.FontWeight.Medium,
+                                                color = MaterialTheme.colorScheme.primary
+                                            )
+                                        else MaterialTheme.typography.bodyMedium
+                                    )
+                                },
+                                onClick = {
+                                    viewModel.setImagenModel(name)
+                                    imagenDropdownOpen = false
+                                }
+                            )
+                        }
+                    }
+                }
+                Spacer(Modifier.height(4.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedTextField(
+                        value = customImagenModel,
+                        onValueChange = { customImagenModel = it },
+                        placeholder = { Text("e.g. imagen-4.0-generate-001") },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    TextButton(
+                        onClick = {
+                            if (customImagenModel.isNotBlank()) {
+                                viewModel.setImagenModel(customImagenModel.trim())
+                                customImagenModel = ""
+                            }
+                        }
+                    ) { Text("Use") }
+                }
+                Text(
+                    "The model uses `generate_image` automatically when you ask for " +
+                        "a drawing/illustration. Imagen is billed separately from Gemini.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
 
             SettingsAccordion(

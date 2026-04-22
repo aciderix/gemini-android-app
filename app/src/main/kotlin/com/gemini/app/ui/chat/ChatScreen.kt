@@ -1,8 +1,14 @@
 package com.gemini.app.ui.chat
 
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import android.provider.DocumentsContract
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.Image
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.LinearEasing
@@ -130,7 +136,9 @@ fun ChatScreen(
     val error by viewModel.error.collectAsState()
     val pendingCall by viewModel.pendingCall.collectAsState()
     val model by viewModel.model.collectAsState()
+    val availableModels by viewModel.availableModels.collectAsState()
     val workspaceLabel by viewModel.workspaceLabel.collectAsState()
+    val workspaceUri by viewModel.workspaceUri.collectAsState()
     val thinking by viewModel.thinking.collectAsState()
     val tokenUsage by viewModel.tokenUsage.collectAsState()
     val compressing by viewModel.compressing.collectAsState()
@@ -141,6 +149,14 @@ fun ChatScreen(
     ) { uri ->
         if (uri != null) viewModel.attachImageFromUri(context, uri)
     }
+    val folderPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocumentTree()
+    ) { uri ->
+        if (uri != null) viewModel.setProjectFolder(uri.toString())
+    }
+
+    var modelMenuOpen by remember { mutableStateOf(false) }
+    var folderMenuOpen by remember { mutableStateOf(false) }
 
     val listState = rememberLazyListState()
     val isNearBottom by remember(listState) {
@@ -189,16 +205,78 @@ fun ChatScreen(
                             )
                             Spacer(Modifier.width(8.dp))
                             Column {
-                                Text(
-                                    model,
-                                    style = MaterialTheme.typography.labelMedium
-                                )
-                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                Box {
                                     Text(
-                                        workspaceLabel.substringAfterLast('/'),
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        model,
+                                        style = MaterialTheme.typography.labelMedium,
+                                        modifier = Modifier
+                                            .clickable { modelMenuOpen = true }
+                                            .padding(vertical = 2.dp, horizontal = 4.dp)
                                     )
+                                    DropdownMenu(
+                                        expanded = modelMenuOpen,
+                                        onDismissRequest = { modelMenuOpen = false }
+                                    ) {
+                                        availableModels.forEach { name ->
+                                            DropdownMenuItem(
+                                                text = {
+                                                    Text(
+                                                        name,
+                                                        style = if (name == model)
+                                                            MaterialTheme.typography.bodyMedium.copy(
+                                                                color = MaterialTheme.colorScheme.primary
+                                                            )
+                                                        else MaterialTheme.typography.bodyMedium
+                                                    )
+                                                },
+                                                onClick = {
+                                                    viewModel.setModel(name)
+                                                    modelMenuOpen = false
+                                                }
+                                            )
+                                        }
+                                        if (availableModels.isNotEmpty()) {
+                                            androidx.compose.material3.HorizontalDivider()
+                                        }
+                                        DropdownMenuItem(
+                                            text = { Text("More models…") },
+                                            onClick = {
+                                                modelMenuOpen = false
+                                                showSettings = true
+                                            }
+                                        )
+                                    }
+                                }
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Box {
+                                        Text(
+                                            workspaceLabel.substringAfterLast('/'),
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier
+                                                .clickable { folderMenuOpen = true }
+                                                .padding(vertical = 2.dp, horizontal = 4.dp)
+                                        )
+                                        DropdownMenu(
+                                            expanded = folderMenuOpen,
+                                            onDismissRequest = { folderMenuOpen = false }
+                                        ) {
+                                            DropdownMenuItem(
+                                                text = { Text("Open folder") },
+                                                onClick = {
+                                                    folderMenuOpen = false
+                                                    openWorkspaceFolder(context, workspaceUri)
+                                                }
+                                            )
+                                            DropdownMenuItem(
+                                                text = { Text("Change folder") },
+                                                onClick = {
+                                                    folderMenuOpen = false
+                                                    folderPicker.launch(null)
+                                                }
+                                            )
+                                        }
+                                    }
                                     val tokenLabel = formatTokens(tokenUsage.total, tokenUsage.limit)
                                     if (tokenLabel != null) {
                                         Spacer(Modifier.width(6.dp))
@@ -594,7 +672,15 @@ fun MessageBubble(
                         }
                     }
                 } else {
-                    MarkdownText(text = message.text, color = content)
+                    Column {
+                        if (message.attachmentPaths.isNotEmpty()) {
+                            AttachmentThumbnails(message.attachmentPaths)
+                            if (message.text.isNotBlank()) Spacer(Modifier.height(6.dp))
+                        }
+                        if (message.text.isNotBlank()) {
+                            MarkdownText(text = message.text, color = content)
+                        }
+                    }
                 }
                 DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                     DropdownMenuItem(
@@ -1103,6 +1189,41 @@ private fun AttachmentThumbnails(paths: List<String>) {
                         )
                 )
             }
+        }
+    }
+}
+
+// Best-effort "reveal workspace in a file manager". For SAF tree URIs we build
+// the corresponding document URI so DocumentsUI can open it; for plain file://
+// URIs we just ACTION_VIEW. There is no universal folder-view intent on
+// Android, so we gracefully fall back to a toast when no app handles it.
+private fun openWorkspaceFolder(context: Context, workspaceUri: String?) {
+    val raw = workspaceUri?.takeIf { it.isNotBlank() }
+    if (raw == null) {
+        Toast.makeText(context, "No workspace folder set", Toast.LENGTH_SHORT).show()
+        return
+    }
+    val uri = runCatching { Uri.parse(raw) }.getOrNull() ?: return
+    val intent = Intent(Intent.ACTION_VIEW).apply {
+        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    }
+    val target = if (uri.scheme == "content") {
+        runCatching {
+            val id = DocumentsContract.getTreeDocumentId(uri)
+            DocumentsContract.buildDocumentUriUsingTree(uri, id)
+        }.getOrNull() ?: uri
+    } else uri
+    intent.setDataAndType(target, "vnd.android.document/directory")
+    runCatching { context.startActivity(intent) }.onFailure {
+        // Retry without mime type — some Files apps only match on the URI.
+        val fallback = Intent(Intent.ACTION_VIEW, target)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        runCatching { context.startActivity(fallback) }.onFailure {
+            Toast.makeText(
+                context,
+                "No app available to open this folder",
+                Toast.LENGTH_SHORT
+            ).show()
         }
     }
 }

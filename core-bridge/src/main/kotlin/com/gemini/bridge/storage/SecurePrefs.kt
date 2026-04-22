@@ -38,6 +38,12 @@ class SecurePrefs(context: Context) {
             if (value.isNullOrBlank()) remove(KEY_MODEL) else putString(KEY_MODEL, value)
         }.apply()
 
+    var imagenModel: String?
+        get() = plain.getString(KEY_IMAGEN_MODEL, null)
+        set(value) = plain.edit().apply {
+            if (value.isNullOrBlank()) remove(KEY_IMAGEN_MODEL) else putString(KEY_IMAGEN_MODEL, value)
+        }.apply()
+
     var workspaceUri: String?
         get() = plain.getString(KEY_WORKSPACE, null)
         set(value) = plain.edit().apply {
@@ -73,6 +79,7 @@ class SecurePrefs(context: Context) {
     private companion object {
         const val KEY_API = "api_key"
         const val KEY_MODEL = "model"
+        const val KEY_IMAGEN_MODEL = "imagen_model"
         const val KEY_WORKSPACE = "workspace_uri"
         const val KEY_AUTO_APPROVE = "auto_approve"
         const val KEY_TERMUX_GUIDE_SHOWN = "termux_guide_shown"

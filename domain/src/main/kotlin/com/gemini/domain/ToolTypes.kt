@@ -25,7 +25,10 @@ data class ToolCallResult(
     val callId: String,
     val ok: Boolean,
     val output: String,
-    val truncated: Boolean = false
+    val truncated: Boolean = false,
+    // Paths of image files produced by the tool (e.g. generate_image). The
+    // chat bubble for the tool-result message renders them as thumbnails.
+    val attachmentPaths: List<String> = emptyList()
 )
 
 /** User-level decision for a pending tool call surfaced by the model. */
