@@ -7,6 +7,7 @@ import android.util.Log
 import com.gemini.bridge.termux.TermuxBridge
 import com.gemini.bridge.tools.DeleteFileTool
 import com.gemini.bridge.tools.EditFileTool
+import com.gemini.bridge.tools.GenerateImageTool
 import com.gemini.bridge.tools.GlobTool
 import com.gemini.bridge.tools.GrepTool
 import com.gemini.bridge.tools.ListDirTool
